@@ -9,9 +9,19 @@ output: pdf_document
 knitr::opts_chunk$set(echo = TRUE)
 
 library(tree)
-library(ISLR)
+library(plyr)
+library(knitr)
 library(dplyr)
+library(class)
+library(mosaic)
+library(tidyr)
+library(maps)
 library(ggplot2)
+library(datasets)
+library(broom)
+library(modelr)
+library(purrr)
+library(boot)
 
 #can change back to pattern = ".csv"
 filenames <- list.files(path=getwd(), pattern = "accident.csv")
@@ -32,7 +42,8 @@ accident1 <- accident %>%
          percent_killed = (FATALS/total_persons)) %>%
   #selecting columns we want to include in the models
   select(c(STATE, MONTH, DAY_WEEK, HOUR, MAN_COLL, TYP_INT, WRK_ZONE, 
-           LGT_COND, WEATHER1, DRUNK_DR, percent_killed, total_persons))
+           LGT_COND, WEATHER1, DRUNK_DR, percent_killed, total_persons)) %>%
+  filter(!(percent_killed == 1 & total_persons == 1))
 
 med_percent_fatalities <- median(accident1$percent_killed)
 
@@ -126,8 +137,11 @@ accident1 <- accident1 %>%
 ```
 
 
-#plot of reponse variable with drunk driver
+#plot of reponse variable
 ```{r}
+ggplot(accident1, aes(percent_killed)) + geom_density()
+
+#plot of reponse variable with drunk driver
 accident_plot <- accident1 %>%
   mutate(y = ifelse(above_fatal_med == "above", 1, 0))
 
@@ -135,3 +149,89 @@ ggplot(accident_plot, aes(x=drunk_dr_bin, y=y)) + geom_point() +
   stat_smooth(method="glm", method.args=list(family="binomial"), se=FALSE)
 ```
 
+#exploratory data analysis of 100% killed
+```{r}
+accident_100 <- accident1 %>%
+  filter(percent_killed == 1)
+
+#how many of the accidents with 100% killed only have one person therefore HAVE to have 100% killed
+favstats(accident_100$total_persons)
+
+ggplot(accident_100, aes(total_persons)) + geom_histogram()
+#a lot!!
+```
+
+#running logistic regression again
+```{r}
+accident_final <- accident1 %>%
+  #getting rid of the variables used to create y variable
+  select(-c(total_persons,percent_killed)) %>%
+  #filtering out certain levels of the factors in order to avoid error on predict function
+  #should we do bootstrap instead?
+  filter(!states_cat %in% c("District of Columbia", "Puerto Rico"),
+         !man_coll_cat == "rear-to-rear",
+         !lgt_cond_cat == "other",
+         !type_int_cat %in% c("traffic circle", "roundabout"),
+         !weather_cat == "blowing snow")
+
+for (i in 1:10){
+  set.seed(i)
+  
+  train <- accident_final %>%
+    sample_frac(0.2)
+  
+  test <- accident_final %>%
+    setdiff(train)
+  
+  # Fit a logistic regression model to predict whether or not the fatalities 
+  # would be above or below the median fatality rate
+  glm_fit <- glm(above_fatal_med~.,
+              data = train,
+              family = binomial)
+  
+  # Use the model to predict the response on the test data
+  glm_probs <- data.frame(probs = predict(glm_fit,
+                                       newdata = test,
+                                       type="response"))
+    
+  # Confusion matrix
+  glm_pred <- glm_probs %>%
+    mutate(pred = ifelse(probs>.5, "above", "below"))
+  
+  glm_pred <- cbind(test, glm_pred)
+  
+  result <- glm_pred %>%
+    summarize(score = mean(pred == above_fatal_med))
+  
+  print(glm_pred %>%
+    count(pred, above_fatal_med) %>%
+    spread(above_fatal_med, n, fill = 0))
+  
+  print(result)
+}
+
+```
+
+#individual model
+```{r}
+#to look at the predictors individually
+  set.seed(10)
+  
+  train <- accident_final %>%
+    sample_frac(0.2)
+  
+  test <- accident_final %>%
+    setdiff(train)
+  
+  glm_fit <- glm(above_fatal_med~.,
+              data = train,
+              family = binomial)
+  summary(glm_fit)
+  
+  #predicting with this individual model (yes also above)
+  glm_probs <- data.frame(probs = predict(glm_fit,
+                                       newdata = test,
+                                       type="response"))
+```
+
+#
