@@ -92,7 +92,7 @@ accident1 <- accident1 %>%
 
 #manner of collision
 collision <- c("not collision", "front-to-rear", "front-to-front", "angle", "sideswipe-same", "sideswipe-different",
-               "read-to-side", "rear-to-rear", "other")
+               "rear-to-side", "rear-to-rear", "other")
 
 accident1 <- accident1 %>%
   filter(!MAN_COLL %in% c(98, 99)) %>%
