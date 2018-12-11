@@ -24,6 +24,8 @@ library(tidyr)
 library(boot)
 library(tree)
 library(gbm)
+library(caret)
+library(ROCR)
 
 accident <- read.csv("accident.csv")
 ```
@@ -42,7 +44,7 @@ med_percent_fatalities <- median(accident1$percent_killed)
 
 accident1 <- accident1 %>%
   mutate(fatal_med = as.factor(ifelse(percent_killed > med_percent_fatalities, "above", "below")))
-  # filter(!(total_persons == 1 & percent_killed == 1))
+  #filter(!(total_persons == 1 & percent_killed == 1))
 
 #state
 states <- c("Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado", 
@@ -188,6 +190,7 @@ text(tree_fatalities, pretty = 0)
 ```{r}
 tree_pred <- predict(tree_fatalities, test, type = "class")
 
+
 table(tree_pred, test$fatal_med)
 
 ((5427+13173)/24557)
@@ -217,6 +220,9 @@ table(tree_pred, test$fatal_med)
 #slightly lower prediction accuracy
 #more interpretable tree
 ```
+
+
+
 
 
 #running with a different package
