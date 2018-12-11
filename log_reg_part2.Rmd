@@ -42,13 +42,13 @@ accident1 <- accident %>%
          percent_killed = (FATALS/total_persons)) %>%
   #selecting columns we want to include in the models
   select(c(STATE, MONTH, DAY_WEEK, HOUR, MAN_COLL, TYP_INT, WRK_ZONE, 
-           LGT_COND, WEATHER1, DRUNK_DR, percent_killed, total_persons)) %>%
-  filter(!(percent_killed == 1 & total_persons == 1))
+           LGT_COND, WEATHER1, DRUNK_DR, percent_killed, total_persons))
+  # filter(!(percent_killed == 1 & total_persons == 1))
 
 med_percent_fatalities <- median(accident1$percent_killed)
 
 accident1 <- accident1 %>%
-  mutate(above_fatal_med = as.factor(ifelse(percent_killed >= med_percent_fatalities, "above", "below")))
+  mutate(above_fatal_med = as.factor(ifelse(percent_killed > med_percent_fatalities, "above", "below")))
 ```
 
 #cleaning factors
@@ -139,7 +139,12 @@ accident1 <- accident1 %>%
 
 #plot of reponse variable
 ```{r}
-ggplot(accident1, aes(percent_killed)) + geom_histogram()
+accident1$persons_n <- ifelse(accident1$total_persons == 1, "one person involved", 
+                              ifelse(accident1$total_persons == 2, "two people involved", "more than two people involved"))
+
+ggplot(accident1, aes(percent_killed)) + geom_bar(aes(fill=persons_n))
+
+table(accident1$persons_n, accident1$percent_killed)
 
 #plot of reponse variable with drunk driver
 accident_plot <- accident1 %>%
@@ -147,6 +152,8 @@ accident_plot <- accident1 %>%
 
 ggplot(accident_plot, aes(x=drunk_dr_bin, y=y)) + geom_point() + 
   stat_smooth(method="glm", method.args=list(family="binomial"), se=FALSE)
+
+ggplot(accident1, aes(percent_killed)) + geom_density() + theme_classic()
 ```
 
 #exploratory data analysis of 100% killed
@@ -245,7 +252,7 @@ for (i in 1:10){
   
   result
   
-  #correct 38% of the time
+  #correct 24.7% of the time
   
   #confusion matrix
   glm_pred %>%
