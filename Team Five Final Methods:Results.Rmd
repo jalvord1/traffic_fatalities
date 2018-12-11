@@ -1,0 +1,489 @@
+---
+title: "Team Five Final Methods/Results"
+author: "Julianna Alvord, Tony Zhang, Kara VanAllen, Aurora Lopez, Vivian Wang"
+date: "12/11/2018"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+library(plyr)
+library(knitr)
+library(dplyr)
+library(class)
+library(mosaic)
+library(tidyr)
+library(maps)
+library(ggplot2)
+library(datasets)
+library(broom)
+library(modelr)
+library(purrr)
+library(tidyr)
+library(boot)
+library(tree)
+library(gbm)
+library(caret)
+library(ROCR)
+
+accident <- read.csv("accident.csv")
+```
+
+#Cleaning Data, Creating Variables and Exploratory Data Analysis
+
+##Creating Percent Killed and Binary Response Variables
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=60)}
+accident1 <- accident %>%
+  #creating percent_killed outcome variable
+  mutate(total_persons = (PERNOTMVIT + PERMVIT),
+         percent_killed = (FATALS/total_persons)) %>%
+  #selecting columns we want to include in the models
+  select(c(STATE, MONTH, DAY_WEEK, HOUR, MAN_COLL, TYP_INT, WRK_ZONE, 
+           LGT_COND, WEATHER1, DRUNK_DR, percent_killed, total_persons))
+
+#pulling out the median fatality rate for entire dataset
+med_percent_fatalities <- median(accident1$percent_killed)
+
+#creating binary reponse:
+#if the crash's fatality rate is greater than the median: above, else: at/below
+accident1 <- accident1 %>%
+  mutate(above_fatal_med = as.factor(ifelse(percent_killed > med_percent_fatalities, "above", "at/below")))
+```
+
+##Cleaning Variables
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=55)}
+##state
+states <- c("Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado", "Connecticut", "Delaware", 
+            "District of Columbia", "Florida", "Georgia", "Hawaii", "Idaho", "Illinois", "Indiana", "Iowa", "Kansas", 
+            "Kentucky", "Louisiana", "Maine", "Maryland", "Massachusetts", "Michigan", "Minnesota", "Mississippi", 
+            "Missouri", "Montana", "Nebraska", "Nevada", "New Hampshire", "New Jersey", "New Mexico", "New York",
+            "North Carolina", "North Dakota", "Ohio", "Oklahoma", "Oregon", "Pennsylvania", "Puerto Rico", "Rhode Island",
+            "South Carolina", "South Dakota", "Tennessee", "Texas", "Utah", "Vermont", "Virginia", "Virgin Islands", 
+            "Washington", "West Virginia", "Wisconsin", "Wyoming")
+
+accident1 <- accident1 %>%
+  #creating new state variable with factors listed above
+  mutate(states_cat = factor(STATE, levels = c(1, 2, 4, 5, 6, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20,
+                                               21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35,
+                                               36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51,
+                                               52, 53, 54, 55, 56), labels = states)) %>%
+  #getting rid of old state variable
+  select(-STATE)
+
+##month
+months <- c("January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
+            "November", "December")
+
+accident1 <- accident1 %>%
+  #creating new month variable with factors listed above
+  mutate(months_cat = factor(MONTH, levels = c(1:12), labels = months)) %>%
+  #getting rid of old month variable
+  select(-MONTH)
+
+##day_week
+days <- c("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")
+
+accident1 <- accident1 %>%
+  #creating new day of week variable with factors listed above
+  mutate(day_week_cat = factor(DAY_WEEK, levels = c(1:7), labels = days)) %>%
+  #getting rid of old day of the week variable
+  select(-DAY_WEEK)
+
+##hour
+accident1 <- accident1 %>%
+  #filter out when hour is not available
+  filter(!HOUR == 99) %>%
+  #creating a new factor variable of hour
+  mutate(hour_cat = as.factor(HOUR)) %>%
+  #getting rid of old hour variable
+  select(-HOUR)
+
+##manner of collision
+collision <- c("not collision", "front-to-rear", "front-to-front", "angle", "sideswipe-same", "sideswipe-different",
+               "rear-to-side", "rear-to-rear", "other")
+
+accident1 <- accident1 %>%
+  #filtering out when manner of collision is not available
+  filter(!MAN_COLL %in% c(98, 99)) %>%
+  #creating new manner of collision variable with factors listed above
+  mutate(man_coll_cat = factor(MAN_COLL, levels = c(0,1,2,6,7,8,9,10,11), labels = collision)) %>%
+  #getting rid of old manner of collision variable
+  select(-MAN_COLL)
+
+##type of intersection
+intersection <- c("not intersection", "four-way", "t-intersection", "y-intersection", "traffic circle", "roundabout",
+                  "five point+")
+
+accident1 <- accident1 %>%
+  #filtering out when type of intersection is unavailable
+  filter(!TYP_INT %in% c(10, 98, 99)) %>%
+  #creating new type of intersection variable with factors listed above
+  mutate(type_int_cat = factor(TYP_INT, levels = c(1:7), labels = intersection)) %>%
+  #getting rid of old type of intersection variable
+  select(-TYP_INT)
+
+##work zone
+accident1 <- accident1 %>%
+  #creating binary work zone variable
+  mutate(work_zone_bin = ifelse(WRK_ZONE == 0, 0, 1)) %>%
+  #getting rid of old work zone variable
+  select(-WRK_ZONE)
+
+##light condition
+light <- c("daylight", "dark-not lighted", "dark-lighted", "dawn", "dusk", "dark-unknown", "other")
+
+accident1 <- accident1 %>%
+  #filtering out when light condition is not available
+  filter(!LGT_COND %in% c(8, 9)) %>%
+  #creating new light condition variable with factors listed above
+  mutate(lgt_cond_cat = factor(LGT_COND, levels = c(1:7), labels = light)) %>%
+  #getting rid of old light condition variable
+  select(-LGT_COND)
+
+##weather
+weather <- c("none", "clear", "rain", "sleet", "snow", "fog", "crosswinds", "blowing sand", "other", "cloudy", 
+             "blowing snow")
+
+accident1 <- accident1 %>%
+  #filtering out when weather condition is not available
+  filter(!WEATHER1 %in% c(98, 99)) %>%
+  #creating new weather variable with factors listed above
+  mutate(weather_cat = factor(WEATHER1, levels = c(1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12), labels = weather)) %>%
+  #getting rid of old weather variable
+  select(-WEATHER1)
+
+##drunk_driver
+accident1 <- accident1 %>%
+  #creating binary drunk driver variable
+  mutate(drunk_dr_bin = ifelse(DRUNK_DR == 0, 0, 1)) %>%
+  #getting rid of old drunk driver variable
+  select(-DRUNK_DR)
+```
+
+##Plot of Fatality Rate Variable
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=55)}
+#plot of percent_killed
+ggplot(accident1, aes(percent_killed)) + geom_density() + theme_classic() +
+  #add a vertical line at the median
+  geom_vline(aes(xintercept = median(accident1$percent_killed)))
+```
+
+#Logistic Regression
+
+##Running Logistic Regression Models with Cross-Validation
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=55)}
+accident_log <- accident1 %>%
+  #getting rid of the variables used to create response variable
+  select(-c(total_persons,percent_killed)) %>%
+  #filtering out certain levels of the factors in order to avoid error on predict function
+  #should we do bootstrap instead?
+  filter(!states_cat %in% c("District of Columbia", "Puerto Rico"),
+         !man_coll_cat == "rear-to-rear",
+         !lgt_cond_cat == "other",
+         !type_int_cat %in% c("traffic circle", "roundabout"),
+         !weather_cat == "blowing snow")
+
+#running cross-validation where k = 10
+for (i in 1:10){
+  set.seed(i)
+  
+  #training set with random 20% of data
+  train_log <- accident_log %>%
+    sample_frac(0.2)
+  
+  #test set with rest of data
+  test_log <- accident_log %>%
+    setdiff(train_log)
+  
+  # Fit a logistic regression model to predict whether or not the fatalities 
+  # would be above or below the median fatality rate
+  glm_fit <- glm(above_fatal_med~.,
+              data = train_log,
+              family = binomial)
+  
+  # Use the model to predict the response on the test data
+  glm_probs <- data.frame(probs = predict(glm_fit,
+                                       newdata = test_log,
+                                       type="response"))
+    
+  #if prediction is above 50%: above, else at/below
+  glm_pred <- glm_probs %>%
+    mutate(pred = ifelse(probs>.5, "above", "at/below"))
+  
+  #bind predictions to the test data
+  glm_pred <- cbind(test_log, glm_pred)
+  
+  #test accuracy
+  result <- glm_pred %>%
+    summarize(score = mean(pred == above_fatal_med))
+  
+  #confusion matrix
+  print(glm_pred %>%
+    count(pred, above_fatal_med) %>%
+    spread(above_fatal_med, n, fill = 0))
+  
+  print(result)
+}
+
+```
+
+##Running Individual Model with Best Training/Test Set
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=55)}
+#to look at the predictors individually
+  set.seed(10)
+  
+  #training set with random 20% of data
+  train_log <- accident_log %>%
+    sample_frac(0.2)
+  
+  #test set with rest of data
+  test_log <- accident_log %>%
+    setdiff(train_log)
+  
+  #running logistic regression model
+  glm_fit <- glm(above_fatal_med~.,
+              data = train_log,
+              family = binomial)
+  #individual predictors
+  summary(glm_fit)
+  
+  #predicting with this individual model (yes also above)
+  glm_probs <- data.frame(probs = predict(glm_fit,
+                                       newdata = test_log,
+                                       type="response"))
+  
+  #if prediction is above 50%: above, else at/below
+  glm_pred <- glm_probs %>%
+    mutate(pred = ifelse(probs>.5, "above", "at/below"))
+  
+  #bind predictions to the test data
+  glm_pred <- cbind(test_log, glm_pred)
+  
+  #test accuracy
+  result <- glm_pred %>%
+    summarize(score = mean(pred == above_fatal_med))
+  
+  result
+  #correct 24.7% of the time
+  
+  #confusion matrix
+  glm_pred %>%
+    count(pred, above_fatal_med) %>%
+    spread(above_fatal_med, n, fill = 0)
+  
+  #our model is much worse at predicting accidents as at/below
+  #misclassified as above when it was actually at/below 72% of the time
+```
+
+##Running Logistic Regression Model with New Predictor Combinations
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=55)}
+accident_small <- accident_log %>%
+  #getting rid of predictors that do not seem significant
+  select(-c(weather_cat, work_zone_bin, months_cat, type_int_cat, hour_cat, lgt_cond_cat))
+
+#to look at the predictors individually
+  set.seed(10)
+  
+  #training set with random 20% of data
+  train_log <- accident_small %>%
+    sample_frac(0.2)
+  
+  #test set with rest of data
+  test_log <- accident_small %>%
+    setdiff(train_log)
+  
+  #running logistic regression model
+  glm_fit <- glm(above_fatal_med~.,
+              data = train_log,
+              family = binomial)
+  #individual predictors
+  summary(glm_fit)
+  
+  #predicting with this individual model (yes also above)
+  glm_probs <- data.frame(probs = predict(glm_fit,
+                                       newdata = test_log,
+                                       type="response"))
+  
+  #if prediction is above 50%: above, else at/below
+  glm_pred <- glm_probs %>%
+    mutate(pred = ifelse(probs>.5, "above", "at/below"))
+  
+  #bind predictions to the test data
+  glm_pred <- cbind(test_log, glm_pred)
+  
+  #test accuracy
+  result <- glm_pred %>%
+    summarize(score = mean(pred == above_fatal_med))
+  
+  result
+  #correct 32% of the time
+  
+  #confusion matrix
+  glm_pred %>%
+    count(pred, above_fatal_med) %>%
+    spread(above_fatal_med, n, fill = 0)
+  
+  #our model is much worse at predicting accidents as at/below
+  #misclassified as above when it was actually at/below 72% of the time
+  
+  #This chunk changed a lot throughout the process! -> nothing helped our prediction accuracy
+```
+
+#Classification Trees
+
+##Creating Training and Test Data
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=55)}
+#number above or below in full dataset
+table(accident1$above_fatal_med)
+9839/(9839+21615)
+#31.2% were above the median
+#68.8% were at or below the median
+
+
+accident1 <- accident1 %>%
+  select(-c(total_persons, percent_killed))
+
+set.seed(1)
+
+#training set with random 20% of data
+train_tree <- accident1 %>%
+  sample_frac(0.2)
+
+#number above or below in train
+table(train_tree$above_fatal_med)
+1981/(1981+4310)
+#31.4%
+
+#test set with the rest of the data
+test_tree <- accident1 %>%
+  setdiff(train_tree)
+
+#number above or below in test
+table(test_tree$above_fatal_med)
+7675/(7675+16921)
+#31.2%
+
+#baseline accuracy is around 68-69%
+```
+
+##Running Initial Classification Tree
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=55)}
+#running model
+tree_fatalities <- tree(above_fatal_med ~ . -states_cat, train_tree)
+
+#summary of predictors used, deviance, and misclassification error rate
+summary(tree_fatalities)
+
+#plotting the tree
+plot(tree_fatalities)
+text(tree_fatalities, pretty = 0)
+```
+
+##Classification Tree Results
+```{r}
+#making the predictions
+tree_pred <- predict(tree_fatalities, test_tree, type = "class")
+
+#confusion matrix
+table(tree_pred, test_tree$above_fatal_med)
+
+#test error
+((5427+13173)/24557)
+#much higher at 76%
+```
+
+##Running a Cross-Validation
+```{r}
+set.seed(3)
+#classification error rate instead of deviance (default)
+cv_fatalities = cv.tree(tree_fatalities, FUN = prune.misclass)
+```
+
+##Cross-Validation Results
+```{r}
+#plotting size by deviance
+plot(cv_fatalities$size, cv_fatalities$dev, type = "b")
+
+#prunning
+prune_fatalities <- prune.misclass(tree_fatalities, best = 2)
+#plotting new prunned tree
+plot(prune_fatalities)
+text(prune_fatalities, pretty = 0)
+
+#making predictions on test set
+tree_pred <- predict(prune_fatalities, test_tree, type = "class")
+#confusion matrix
+table(tree_pred, test_tree$above_fatal_med)
+
+#test error
+(15315+2973)/24596
+#74.35% accuracy on test set
+
+#slightly lower prediction accuracy
+#more interpretable tree
+```
+
+##Boosting Classification Tree
+```{r}
+set.seed(1)
+
+#training set with random 20% of data
+train_boost <- accident1 %>%
+  sample_frac(0.2)
+
+#test set with rest of data
+test_boost <- accident1 %>%
+  setdiff(train_boost)
+
+train_boost <- train_boost %>%
+  #making response a binary (1,0) variable instead of binary factor
+  mutate(med_fatal = ifelse(above_fatal_med == "above", 1, 0)) %>%
+  #getting rid of old response
+  select(-above_fatal_med)
+
+test_boost <- test_boost %>%
+  #making response a binary (1,0) variable instead of binary factor
+  mutate(med_fatal = ifelse(above_fatal_med == "above", 1, 0)) %>%
+  #getting rid of old response
+  select(-above_fatal_med)
+
+#running the boosting model with 5000 trees and 0.01 shrinkage
+boost_fatalities <- gbm(med_fatal~.,
+                    data = train_boost,
+                    distribution = "bernoulli",
+                    n.trees = 5000,
+                    shrinkage = 0.01,
+                    interaction.depth = 4)
+
+#which variables have highest relative influence
+summary(boost_fatalities)
+
+#plotting those variables with their relative influence per level
+plot(boost_fatalities, i = "states_cat")
+plot(boost_fatalities, i = "man_coll_cat")
+plot(boost_fatalities, i = "drunk_dr_bin")
+plot(boost_fatalities, i = "hour_cat")
+```
+
+##Boosting Tree Results
+```{r}
+#predicting on test data
+boost_estimate <- predict(boost_fatalities,
+                         newdata = test_boost,
+                         n.trees = 5000)
+
+#if prediction is above 50%: above, else at/below
+boost_class<-ifelse(boost_estimate<=0.5,0,1)
+
+
+#Cross-Validation
+table(boost_class,test_boost$med_fatal)
+
+#test error
+(15181+2786)/24596
+#73%
+#lower prediction accuracy than normal classification tree with cross-val
+
+#Final model to use: classification tree with cross-val
+```
